@@ -123,8 +123,7 @@ t('response of length 1 → 0 complete nights, no crash', () => {
 });
 
 console.log('== moon phase / illumination ==');
-t('phase→illumination is consistent (new→0, half→0.5, full→1)', () => {
-  assert.ok(Math.abs(S.phaseToIllum(0)-0) < 1e-9);
+t('phase→illumination is consistent (new→0, half→0.5, full→1)', () => {  assert.ok(Math.abs(S.phaseToIllum(0)-0) < 1e-9);
   assert.ok(Math.abs(S.phaseToIllum(0.25)-0.5) < 1e-9);
   assert.ok(Math.abs(S.phaseToIllum(0.5)-1) < 1e-9);
   assert.ok(Math.abs(S.phaseToIllum(0.75)-0.5) < 1e-9);
@@ -135,6 +134,22 @@ t('local synodic approximation matches reference phases within tolerance', () =>
   const deg=(a,b)=>{ const d=Math.abs(a-b); return Math.min(d,1-d); };
   assert.ok(deg(NEW,0) < 0.03, `new-moon phase ${NEW} not near 0`);
   assert.ok(deg(FULL,0.5) < 0.03, `full-moon phase ${FULL} not near 0.5`);
+});
+
+console.log('== mini calendar month stepping ==');
+t('renders 12 distinct consecutive months, not 12 days of one month', () => {
+  const td = S.zonedParts('America/Los_Angeles', Date.UTC(2026,7,20,12)); // Aug 2026
+  const seen = new Set();
+  for(let k=0;k<12;k++){ const m = S.addCivilDays(td.y, td.mo+k, 1, 0); seen.add(m.y+'-'+m.mo); }
+  assert.strictEqual(seen.size, 12, 'expected 12 distinct (year,month) blocks');
+  const first = S.addCivilDays(td.y, td.mo, 1, 0);
+  const last  = S.addCivilDays(td.y, td.mo+11, 1, 0);
+  assert.deepStrictEqual([first.y, first.mo, first.d], [2026, 7, 1]);
+  assert.deepStrictEqual([last.y, last.mo], [2027, 6]);   // Aug 2026 +11 months = Jul 2027
+  // day-stepping (the bug) would produce 12 distinct days in ONE month
+  const bug = new Set();
+  for(let k=0;k<12;k++){ const m = S.addCivilDays(td.y, td.mo, 1, k); bug.add(m.mo); }
+  assert.strictEqual(bug.size, 1, 'day-stepping stays in one month (the bug)');
 });
 
 console.log('== state / coordinate survival ==');

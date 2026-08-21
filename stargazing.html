@@ -462,7 +462,7 @@ function stars(score){ const n=score>=80?5:score>=65?4:score>=50?3:score>=35?2:1
 function renderMini(settings, weather, tz){
   const grid=$("minigrid"); if(!grid) return;
   const td=todayCivil(tz), apiNights=state.weather?nightCloud(state.weather):[]; let html="";
-  for(let k=0;k<12;k++){ const mDate=addCivilDays(td.y,td.mo,1,k), y=mDate.y, m=mDate.mo;
+  for(let k=0;k<12;k++){ const mDate=addCivilDays(td.y, td.mo+k, 1, 0), y=mDate.y, m=mDate.mo;
     const daysIn=new Date(Date.UTC(y,m+1,0)).getUTCDate(), lead=new Date(Date.UTC(y,m,1)).getUTCDay();
     let body=WDSH.map(w=>'<div class="daylab">'+w+'</div>').join("");
     for(let b=0;b<lead;b++) body+='<div class="cell empty"></div>';
