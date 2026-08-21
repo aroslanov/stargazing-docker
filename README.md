@@ -1,6 +1,6 @@
-# Stargazing Calendar — Docker Compose
+# Stargazing Calendar
 
-A vive-coded self-contained static web app that shows a 30-day stargazing calendar:
+A self-contained static web app that shows a 30-day stargazing calendar:
 moon phase (% illumination, computed locally), real overnight cloud-cover
 forecast (live Open-Meteo, no API key), sunrise/sunset times, the **hours each
 night the Milky Way core is visible + its peak altitude** (computed locally),
@@ -29,25 +29,32 @@ bottom, a **year-at-a-glance mini calendar** (same color coding) maps the next
 12 months; click any day to jump the main calendar to it.
 
 ## Requirements
-- Docker with Docker Compose (v2).
+- Any modern browser (Chrome, Edge, Firefox, Safari). No Docker, no server,
+  no build step, and no dependencies required.
 
 ## Files
 - `stargazing.html`  – the app. **Edit `SETTINGS` at the top** for your
   coordinates (default is Joshua Tree, CA).
-- `Dockerfile`       – nginx serving the file.
-- `docker-compose.yml` – port mapping + live file mount.
 - `tests/run-tests.js` – deterministic Node tests of the scoring / astronomy /
   timezone logic (no network).
 - `package.json`    – `npm test` shorthand for the tests.
+- `Dockerfile` / `docker-compose.yml` – optional, for serving the file via
+  nginx if you prefer (not required).
 
 ## Run
+Just open `stargazing.html` in any modern browser — double-click the file or
+drag it into a browser window. No server needed.
+
+Edit `./stargazing.html` at any time and just refresh the page — no rebuild
+needed.
+
+### Optional: serve with Docker
+If you'd rather serve it over HTTP (e.g. to share on a LAN), you can still use
+the included Docker setup:
 ```bash
 docker compose up -d --build
 ```
 Then open http://localhost:8080/ in a browser.
-
-Edit `./stargazing.html` on your host at any time and just refresh the
-page — no rebuild needed.
 
 ## Tests
 ```bash
@@ -62,12 +69,12 @@ don't crash; a 16-day response yields 15 complete nights (final = null);
 phase/illumination consistency; and timezone handling for Tokyo, Auckland, LA
 DST transitions (23 h / 25 h days) and the International Date Line.
 
-## Stop
+## Stop (Docker only)
 ```bash
 docker compose down
 ```
 
-## Change port
+## Change port (Docker only)
 Edit `8080:80` in docker-compose.yml to e.g. `9000:80`, then
 `docker compose up -d`.
 
