@@ -1,0 +1,12 @@
+services:
+  stargazing:
+    build: .
+    image: stargazing-calendar:local
+    container_name: stargazing-calendar
+    ports:
+      - "8080:80"
+    # Mount the HTML so you can edit your coordinates in ./stargazing.html
+    # on your host and just refresh the browser — no rebuild needed.
+    volumes:
+      - ./stargazing.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
