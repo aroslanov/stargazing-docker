@@ -52,6 +52,21 @@
     border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:6px; position:relative}
   .card.today{border-color:var(--acc)}
   .card.perfect{background:linear-gradient(180deg,#15331f,#16263a); border-color:var(--good); box-shadow:0 0 22px rgba(110,231,183,.18)}
+  .card.super{background:linear-gradient(180deg,#0f3150,#152a47); border-color:#7db4ff; box-shadow:0 0 26px rgba(125,180,255,.28)}
+  .card.super .perfect-flag{background:#7db4ff; color:#061226}
+  .mw{margin-top:2px; font-size:12px; color:var(--acc); font-weight:600}
+  .mw .dim{color:var(--faint); font-weight:400}
+  .sunt{margin-top:2px; font-size:12px; color:var(--dim)}
+  .pager{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0;
+    background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px}
+  .pager .range{flex:1; min-width:200px; text-align:center; color:var(--ink); font-weight:700; font-size:14px}
+  .pager .range small{display:block; color:var(--dim); font-weight:400; font-size:11px; margin-top:2px}
+  button.ghost{background:transparent; border:1px solid var(--border); color:var(--ink); border-radius:8px;
+    padding:8px 14px; font-weight:600; font-size:13px}
+  button.ghost:hover{border-color:var(--acc); color:var(--acc)}
+  .note{color:var(--dim); font-size:12px; margin:0 0 12px; background:#1a2138;
+    border:1px dashed var(--border); border-radius:8px; padding:8px 12px}
+  .note b{color:var(--ink)}
   .card .dow{font-size:12px; color:var(--faint); text-transform:uppercase; letter-spacing:.7px}
   .card .date{font-size:15px; font-weight:700}
   .card .date .badge{background:#3a2f0a; color:var(--gold); font-size:10px; padding:2px 6px; border-radius:6px; margin-left:6px; vertical-align:middle; font-weight:700}
@@ -99,6 +114,17 @@
       days         : 30,                    // how many days of calendar to show
       maxMoonPct   : 15,                    // "no moon" threshold: % illumination at/below = moon-free
       maxCloudPct  : 25,                    // "no cloud" threshold: avg night cloud at/below = cloud-free
+      // Milky Way + superb-night styling -------------------------------------
+      milkyWayMinAlt: 15,                    // galactic core altitude needed (°) to count as "visible"
+      astroDark     : 18,                    // sun must be ≥ this many ° below horizon (astronomical night)
+      markSuper     : true,                  // blue-tint cards scoring ≥ superScore
+      superScore    : 99,                    // score threshold for the blue "superb" highlight
+      // Rating weights — how much each factor counts toward the 0–100 score.
+      // MW is intentionally minor (5%): perfect sky (no cloud + no moon)
+      // scores 95%; a well-placed Milky Way adds the last 5% → 100%.
+      weightCloud   : 0.50,
+      weightMoon    : 0.45,
+      weightMW      : 0.05,
     };
   </script>
   <!-- ════════════════════════════════════════════════════════════════ -->
@@ -120,9 +146,18 @@
     <b>and</b> forecast cloud cover <b>≤</b> <span id="cCloud">—</span>%.
     Cloud cover is the <b>nighttime average</b> (between that sunset and next sunrise) from the live
     <a href="https://open-meteo.com" target="_blank" rel="noopener" style="color:var(--acc)">Open-Meteo</a> forecast
-    (free, no API key). Moon phases are computed locally, so they extend the full calendar even where
-    weather forecast has ended (~16 days).
+    (free, no API key). The 0–100 rating combines clear sky, low moon, and how high the Milky Way
+    core rises during astronomical darkness. Moon phase &amp; Milky Way are computed locally, so they
+    extend the full calendar even where the weather forecast ends (~16 days).
   </p>
+
+  <div class="pager">
+    <button id="prev30" class="ghost">◀ −30 d</button>
+    <span id="rangeLbl" class="range"><span id="rangeMain">…</span><small>page starts this many days from today</small></span>
+    <button id="next30" class="ghost">+30 d ▶</button>
+    <button id="today" class="ghost">Today</button>
+  </div>
+  <div id="weatherNote" class="note" style="display:none"></div>
 
   <div id="summary" class="summary"></div>
   <div id="banner"></div>
@@ -131,9 +166,13 @@
   </div>
 
   <div class="legend">
-    ★ <b>Moon</b>: phase icon, name, and % illumination.
-    ☁ <b>Cloud</b>: nighttime-average cover; a dash means no weather forecast that far out.
-    Score = 0–100 combining low moon + clear sky.
+    🌅/🌇 <b>Sun</b>: sunrise &amp; sunset (live where available, else computed).
+    ★ <b>Moon</b>: phase icon, name, % illumination, moonrise/moonset (↑/↓).
+    ☁ <b>Cloud</b>: nighttime-average cover; a dash means no forecast that far out.
+    🌌 <b>Milky Way</b>: hours core is up during astronomical darkness + its peak altitude.
+    <b>Score</b> = 0–100 (50% cloud + 45% moon + 5% Milky Way) — a perfect dark,
+    moonless sky scores 95%; a well-placed core adds the last 5% → 100%.
+    🔵 Blue = superb (99–100) · green ★ perfect = moon ≤ 15% &amp; cloud ≤ 25%.
   </div>
 
   <footer>Moon phases computed locally (synodic-month astronomy) · weather/moon from Open-Meteo ·
@@ -146,6 +185,8 @@
 
   // ── Utilities ────────────────────────────────────────────────
   const $ = id => document.getElementById(id);
+  let offsetDays = 0;                 // calendar window offset from today, in days (pagination)
+  const STEP = 30;
   const SYNODIC = 29.530588853;                 // mean synodic month, days
   const NEW_MOON_REF = Date.UTC(2000,0,6,18,14); // a known new moon instant (Jan 6 2000 18:14 UTC)
 
@@ -168,14 +209,86 @@
     for(let i=PHASES.length-1;i>=0;i--){ if(f>=PHASES[i].frac){ name=PHASES[i].name; emoji=PHASES[i].emoji; break; } }
     return {frac:f, illumPct:Math.round(illum*100), name, emoji};
   }
-  function calcScore(illumPct, cloud){
-    if(cloud==null) return Math.round((1-illumPct/100)*100);
-    return Math.round(((1-cloud/100)*0.6 + (1-illumPct/100)*0.4) *100);
+  function calcScore(illumPct, cloud, mwFactor, w){
+    w = w || {cloud:0.50, moon:0.45, mw:0.05};
+    const cF = (cloud==null) ? 0.5 : (1-cloud/100);   // unknown cloud = neutral
+    const mF = 1 - illumPct/100;                       // 1 when no moon
+    const r  = (w.cloud||0)*cF + (w.moon||0)*mF + (w.mw||0)*(mwFactor||0);
+    const total = (w.cloud||0)+(w.moon||0)+(w.mw||0) || 1;
+    return Math.round(100 * r/total);
   }
   function stars(score){
     const n = score>=80?5:score>=65?4:score>=50?3:score>=35?2:1;
     const lbl = score>=80?"Excellent":score>=65?"Good":score>=50?"Fair":score>=35?"Poor":"Bad";
     return {n, lbl};
+  }
+  // ── Local astronomy: Milky Way core visibility ─────────────────────
+  // Standard low-precision formulas (good enough for a planning tool).
+  // The Milky Way core is "visible" during each night's hours when the
+  // galactic center (Sagittarius A*) is above the horizon AND the sun is
+  // at least `astroDark`° below it (astronomical night, no twilight).
+  const deg_ = r => r*180/Math.PI;
+  const rad_ = d => d*Math.PI/180;
+  const normDeg_ = x => ((x%360)+360)%360;
+  const toJD_ = d => d.getTime()/86400000 + 2440587.5;      // UTC Julian Date
+  const GC_RA = rad_(266.4051), GC_DEC = rad_(-28.9362);    // galactic center (Sgr A*)
+  function altFromRaDec_(jd, lat, lon, ra, dec){
+    const gmst = normDeg_(280.46061837 + 360.98564736629*(jd-2451545.0));
+    const lst = rad_(gmst + lon);                            // local sidereal time
+    const H = Math.atan2(Math.sin(lst-ra), Math.cos(lst-ra));// hour angle
+    return deg_(Math.asin(Math.sin(rad_(lat))*Math.sin(dec) + Math.cos(rad_(lat))*Math.cos(dec)*Math.cos(H)));
+  }
+  function sunAlt_(jd, lat, lon){
+    const n = jd-2451545.0;
+    const L = normDeg_(280.460 + 0.9856474*n);               // mean longitude
+    const g = rad_(normDeg_(357.528 + 0.9856003*n));         // mean anomaly
+    const lam = rad_(L + 1.915*Math.sin(g) + 0.020*Math.sin(2*g)); // ecliptic longitude
+    const eps = rad_(23.439 - 0.0000004*n);                  // obliquity
+    const ra = Math.atan2(Math.cos(eps)*Math.sin(lam), Math.cos(lam));
+    const dec = Math.asin(Math.sin(eps)*Math.sin(lam));
+    return altFromRaDec_(jd, lat, lon, ra, dec);
+  }
+  // Per-night Milky Way info: {windows:["HH:MM–HH:MM",...], peak:°} for the
+  // night that starts at local `noon`. Windows = hours the galactic core is
+  // ≥ minAlt during astronomical darkness. peak = highest core altitude
+  // reached in those dark hours.
+  function mwInfo(noon, lat, lon, minAlt, dark){
+    const t0 = noon.getTime(), t1 = t0+86400000, step = 1200000; // 20-min steps
+    const win=[]; let cur=null, last=null, peak=-90;
+    for(let t=t0; t<=t1; t+=step){
+      const d = new Date(t), jd = toJD_(d);
+      const darkNow = sunAlt_(jd,lat,lon) <= -(dark||18);
+      const alt = altFromRaDec_(jd,lat,lon,GC_RA,GC_DEC);
+      if(darkNow && alt>peak) peak = alt;
+      const good = darkNow && alt >= (minAlt||15);
+      if(good && !cur){ cur=d; } else if(!good && cur){ win.push([cur,last]); cur=null; } last=d;
+    }
+    if(cur) win.push([cur,last]);
+    return {
+      peak: peak < -80 ? 0 : peak,
+      windows: win.map(([a,b])=>a.toTimeString().slice(0,5) + '–' + b.toTimeString().slice(0,5)),
+    };
+  }
+  // Milky Way rating factor 0..1: how high the core gets in the dark window,
+  // normalised so ~overhead (60°) = 1.0, on the horizon = 0.
+  const mwFactorOf = peak => Math.max(0, Math.min(1, peak/60));
+
+  // Local sunrise/sunset (fallback when the weather API has no data for a day).
+  const _horizon = -0.833;   // minor refraction + solar semidiameter
+  function _interp(t1,a1,t2,a2,target){ return t1 + (t2-t1)*(target-a1)/(a2-a1); }
+  function sunTimes(day, lat, lon){
+    const t0 = new Date(day.getFullYear(),day.getMonth(),day.getDate(),0,0,0).getTime();
+    const t1 = t0+86400000, step=600000; let rise=null, set=null, prev=null;
+    for(let t=t0; t<=t1; t+=step){
+      const alt = sunAlt_(toJD_(new Date(t)), lat, lon);
+      if(prev){
+        if(prev.alt < _horizon && alt >= _horizon && rise==null) rise = _interp(t-step,prev.alt,t,alt,_horizon);
+        if(prev.alt > _horizon && alt <= _horizon && set==null) set = _interp(t-step,prev.alt,t,alt,_horizon);
+      }
+      prev = {alt, t};
+    }
+    const f = t => new Date(t).toTimeString().slice(0,5);
+    return { rise: rise!=null ? f(rise) : '—', set: set!=null ? f(set) : '—' };
   }
   const WD = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -216,7 +329,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────
-  function render(settings, weather, error){
+  function render(settings, weather, error, offset){
     $("cMoon").textContent = settings.maxMoonPct;
     $("cCloud").textContent = settings.maxCloudPct;
     $("locline").textContent = settings.locationName + "  ·  " +
@@ -231,13 +344,28 @@
     $("banner").innerHTML = banner;
 
     const now = new Date();
-    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Window starts `offset` days from today (pagination)
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (offset||0));
 
-    // Night-cloud and API moon_phase for the forecast window
-    const night = weather ? nightCloud(weather) : [];
-    const apiPhase = weather ? weather.daily.moon_phase : [];
-    const apiRise  = weather ? weather.daily.moonrise : [];
-    const apiSet   = weather ? weather.daily.moonset  : [];
+    // Live weather only lines up with the "today" page (offset 0 = real forecast)
+    const useW = (offset===0) && weather;
+    const night = useW ? nightCloud(weather) : [];
+    const apiPhase = useW ? weather.daily.moon_phase : [];
+    const apiRise  = useW ? weather.daily.moonrise : [];
+    const apiSet   = useW ? weather.daily.moonset  : [];
+    const apiSunRise = useW ? weather.daily.sunrise : [];
+    const apiSunSet  = useW ? weather.daily.sunset  : [];
+
+    // Page range label + weather note
+    const rEnd = new Date(base.getFullYear(), base.getMonth(), base.getDate() + settings.days - 1);
+    const rm = $("rangeMain"); if(rm) rm.textContent =
+      MON[base.getMonth()]+" "+base.getDate()+" → "+MON[rEnd.getMonth()]+" "+rEnd.getDate()+", "+rEnd.getFullYear()+
+      (offset ? (" · "+(offset>0?"+":"")+offset+" d from today") : " · this month");
+    const wnote = $("weatherNote");
+    if(wnote){ wnote.style.display = (offset===0) ? "none":"block";
+      wnote.innerHTML = 'ℹ Weather forecast (cloud cover) is only available for the ~16 days from today, '+
+        'so this paged view shows <b>moon &amp; Milky Way</b> only. Cloud-based "perfect" ratings are computed on the <b>Today</b> page.';
+    }
 
     const rows=[];
     for(let off=0; off<settings.days; off++){
@@ -247,10 +375,22 @@
       const cloud = (off < night.length) ? night[off] : null;
       const rose  = (off < apiRise.length)  ? apiRise[off]  : null;
       const set   = (off < apiSet.length)   ? apiSet[off]   : null;
-      const score = calcScore(m.illumPct, cloud);
+      // Sunrise/sunset: prefer the live API values, else compute locally.
+      let sun = {rise:'—', set:'—'};
+      if(off < apiSunRise.length && off < apiSunSet.length && apiSunRise[off] && apiSunSet[off]){
+        sun = {rise: apiSunRise[off].slice(11), set: apiSunSet[off].slice(11)};
+      } else {
+        sun = sunTimes(day, settings.latitude, settings.longitude);
+      }
+      const mwi = (settings.milkyWayMinAlt!=null)
+        ? mwInfo(day, settings.latitude, settings.longitude, settings.milkyWayMinAlt, settings.astroDark)
+        : {windows:[], peak:0};
+      const mwFactor = mwFactorOf(mwi.peak);
+      const score = calcScore(m.illumPct, cloud, mwFactor, settings);
       const perfect = m.illumPct<=settings.maxMoonPct && cloud!=null && cloud<=settings.maxCloudPct;
-      const isToday = off===0;
-      rows.push({off, day, m, cloud, rose, set, score, perfect, isToday});
+      const isSuper = settings.markSuper && score >= settings.superScore;
+      const isToday = (offset + off) === 0;
+      rows.push({off, day, m, cloud, rose, set, sun, mwi, score, perfect, isSuper, isToday});
     }
 
     // Summary stats
@@ -275,7 +415,7 @@
       const cloudTxt = r.cloud==null ? "—" : r.cloud+"%";
       const cloudColor = r.cloud==null ? "var(--faint)"
         : r.cloud<=settings.maxCloudPct ? "var(--good)" : "var(--bad)";
-      return '<div class="card'+(r.perfect?' perfect':'')+(r.isToday?' today':'')+'">'
+      return '<div class="card'+(r.perfect?' perfect':'')+(r.isSuper?' super':'')+(r.isToday?' today':'')+'">'
         +(r.perfect?'<span class="perfect-flag">★ PERFECT</span>':'')
         +'<div class="dow">'+(r.isToday?'Today':'Night '+r.off)+' · '+d.dow+'</div>'
         +'<div class="date">'+d.mon+' '+d.day+'</div>'
@@ -284,9 +424,13 @@
           +'<span class="illum">'+r.m.illumPct+'% illuminated'+
             ((r.rose||r.set)?' <span class="mr">↑'+(r.rose?r.rose.slice(11):'—')+' ↓'+(r.set?r.set.slice(11):'—')+'</span>':'')
           +'</span></div></div>'
+        +'<div class="sunt">🌅 '+r.sun.rise+' · 🌇 '+r.sun.set+'</div>'
         +'<div class="cloud"><span class="pct" style="color:'+cloudColor+'">☁ '+cloudTxt+'</span>'
           +(r.cloud!=null?'<span class="bar"><i style="width:'+r.cloud+'%;background:'+cloudColor+'"></i></span>':'')
           +'</div>'
+        +'<div class="mw">'+ (r.mwi.windows.length
+            ? '🌌 '+r.mwi.windows.join(' &amp; ')+' <span style="opacity:.75;font-weight:400">· peak '+Math.round(r.mwi.peak)+'°</span>'
+            : '<span class="dim">🌌 core not visible</span>') +'</div>'
         +'<div class="stars">'+starsHtml+'<span class="lbl">'+r.score+'/100 '+s.lbl+'</span></div>'
         +'</div>';
     }).join("");
@@ -295,16 +439,19 @@
 
   async function run(overrides){
     const settings = Object.assign({}, SETTINGS, overrides||{});
-    $("grid").innerHTML = '<p class="sub" style="grid-column:1/-1">Fetching live weather for '+
+    const useWeather = offsetDays === 0;                 // forecast aligns to "now" only
+    $("grid").innerHTML = '<p class="sub" style="grid-column:1/-1">'+
+      (useWeather ? "Fetching live weather for " : "Computing moon + Milky Way for ")+
       settings.latitude.toFixed(3)+', '+settings.longitude.toFixed(3)+'…</p>';
     let weather=null, error=null;
-    try{ weather = await fetchWeather(settings.latitude, settings.longitude, settings.days); }
-    catch(e){ error = e.message; }
-    render(settings, weather, error);
+    if(useWeather){ try{ weather = await fetchWeather(settings.latitude, settings.longitude, settings.days); }
+                    catch(e){ error = e.message; } }
+    render(settings, weather, error, offsetDays);
   }
 
   // Controls: apply from the in-page form (does not persist — edit SETTINGS to persist)
   $("apply").addEventListener("click", ()=>{
+    offsetDays = 0;                                     // weather applies on the fresh view
     const over = {
       latitude:parseFloat($("inLat").value),
       longitude:parseFloat($("inLon").value),
@@ -314,6 +461,9 @@
     if(isNaN(over.latitude)||isNaN(over.longitude)){ alert("Enter valid coordinates"); return; }
     run(over);
   });
+  $("prev30").addEventListener("click", ()=>{ offsetDays -= STEP; run(); });
+  $("next30").addEventListener("click", ()=>{ offsetDays += STEP; run(); });
+  $("today").addEventListener("click", ()=>{ offsetDays = 0; run(); });
 
   run();
 })();
