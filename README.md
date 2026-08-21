@@ -1,6 +1,6 @@
 # Stargazing Calendar — Docker Compose
 
-A self-contained static web app that shows a 30-day stargazing calendar:
+A vive-coded self-contained static web app that shows a 30-day stargazing calendar:
 moon phase (% illumination, computed locally), real overnight cloud-cover
 forecast (live Open-Meteo, no API key), sunrise/sunset times, the **hours each
 night the Milky Way core is visible + its peak altitude** (computed locally),
